@@ -1,65 +1,75 @@
-import Image from "next/image";
+import Link from "next/link";
+
+const tools = [
+  {
+    href: "/voice",
+    title: "Voice Recorder",
+    label: "mic",
+    description:
+      "Record yourself speaking and see your words transcribed in real time. Practice pronunciation, storytelling, or daily conversation.",
+  },
+  {
+    href: "/camera",
+    title: "Self Video",
+    label: "camera",
+    description:
+      "Record yourself on camera to review your body language and expressions. Get a transcript you can paste into an AI tool for English feedback.",
+  },
+  {
+    href: "/screen",
+    title: "Screen Recorder",
+    label: "screen",
+    description:
+      "Capture your screen to record presentations or explanations. Watch yourself back and improve your English delivery.",
+  },
+  {
+    href: "/teleprompter",
+    title: "Teleprompter",
+    label: "script",
+    description:
+      "Paste a script and read it aloud with auto-scroll. Perfect for practicing speeches, news reading, or storytelling.",
+  },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="space-y-16">
+      <div className="pt-8 space-y-4">
+        <h1 className="text-4xl font-bold tracking-tight leading-tight">
+          Practice English,
+          <br />
+          your way.
+        </h1>
+        <p className="text-zinc-400 text-lg max-w-md leading-relaxed">
+          Three simple tools to help you speak, record, and improve every day.
+          Everything runs in your browser — nothing is uploaded.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {tools.map((tool) => (
+          <Link
+            key={tool.href}
+            href={tool.href}
+            className="group flex flex-col bg-zinc-900 border border-zinc-800 hover:border-zinc-600 rounded-2xl p-6 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            <span className="text-xs font-mono text-zinc-600 uppercase tracking-widest mb-3">
+              {tool.label}
+            </span>
+            <h2 className="text-lg font-semibold mb-2">{tool.title}</h2>
+            <p className="text-sm text-zinc-400 leading-relaxed flex-1">
+              {tool.description}
+            </p>
+            <span className="mt-6 text-sm text-zinc-600 group-hover:text-zinc-300 transition-colors">
+              Open &rarr;
+            </span>
+          </Link>
+        ))}
+      </div>
+
+      <p className="text-xs text-zinc-700">
+        Works best in Chrome or Edge. Firefox supports recording but not live transcription.
+      </p>
     </div>
   );
 }
