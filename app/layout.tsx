@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "English Lab",
+  title: "Engvidilearning",
   description: "Practice English with voice recording, screen recording, and teleprompter tools",
 };
 

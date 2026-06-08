@@ -2,16 +2,32 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 
+type Segment = { text: string; confidence: number }
+type GrammarStatus = 'idle' | 'checking' | 'done'
+
+interface LTMatch {
+  message: string
+  offset: number
+  length: number
+  replacements: { value: string }[]
+}
+
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5]
+
 export default function CameraPage() {
   const [streaming, setStreaming] = useState(false)
   const [recording, setRecording] = useState(false)
-  const [transcript, setTranscript] = useState('')
+  const [segments, setSegments] = useState<Segment[]>([])
   const [interim, setInterim] = useState('')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [speechSupported, setSpeechSupported] = useState(true)
+  const [grammarStatus, setGrammarStatus] = useState<GrammarStatus>('idle')
+  const [grammarMatches, setGrammarMatches] = useState<LTMatch[]>([])
+  const [playbackSpeed, setPlaybackSpeed] = useState(1)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const playbackRef = useRef<HTMLVideoElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -23,6 +39,8 @@ export default function CameraPage() {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
   }, [])
 
+  const fullText = segments.map((s) => s.text).join('')
+
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -33,7 +51,9 @@ export default function CameraPage() {
       if (videoRef.current) videoRef.current.srcObject = stream
       setStreaming(true)
       setVideoUrl(null)
-      setTranscript('')
+      setSegments([])
+      setGrammarStatus('idle')
+      setGrammarMatches([])
     } catch (_) {
       alert('Camera and microphone access is required. Please allow it in your browser settings.')
     }
@@ -52,12 +72,9 @@ export default function CameraPage() {
 
   const startRecording = useCallback(() => {
     if (!streamRef.current) return
-
     const recorder = new MediaRecorder(streamRef.current)
     chunksRef.current = []
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data)
-    }
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: 'video/webm' })
       setVideoUrl(URL.createObjectURL(blob))
@@ -73,28 +90,31 @@ export default function CameraPage() {
       recognition.interimResults = true
       recognition.lang = 'en-US'
       recognition.onresult = (e) => {
-        let final = ''
         let inter = ''
         for (let i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) final += e.results[i][0].transcript + ' '
-          else inter += e.results[i][0].transcript
+          const r = e.results[i]
+          if (r.isFinal) {
+            const conf = r[0].confidence > 0 ? r[0].confidence : 0.9
+            const clean = r[0].transcript.replace(/[.,!?;:]/g, '').trim()
+            if (clean) setSegments((prev) => [...prev, { text: clean + ' ', confidence: conf }])
+          } else {
+            inter += r[0].transcript
+          }
         }
-        if (final) setTranscript((t) => t + final)
         setInterim(inter)
       }
       recognition.onend = () => {
-        if (recognizingRef.current) {
-          try { recognition.start() } catch (_) { /* restarting */ }
-        } else {
-          setInterim('')
-        }
+        if (recognizingRef.current) { try { recognition.start() } catch (_) {} }
+        else setInterim('')
       }
       recognition.start()
       recognitionRef.current = recognition
     }
 
     setElapsed(0)
-    setTranscript('')
+    setSegments([])
+    setGrammarStatus('idle')
+    setGrammarMatches([])
     timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
     setRecording(true)
   }, [])
@@ -108,24 +128,51 @@ export default function CameraPage() {
     setInterim('')
   }, [])
 
+  const checkGrammar = async () => {
+    const text = fullText.trim()
+    if (!text) return
+    setGrammarStatus('checking')
+    try {
+      const res = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ language: 'en-US', text }).toString(),
+      })
+      const data: { matches: LTMatch[] } = await res.json()
+      setGrammarMatches(data.matches || [])
+      setGrammarStatus('done')
+    } catch (_) {
+      setGrammarStatus('idle')
+      alert('Grammar check failed. Please check your internet connection.')
+    }
+  }
+
+  const applySpeed = (speed: number) => {
+    setPlaybackSpeed(speed)
+    if (playbackRef.current) playbackRef.current.playbackRate = speed
+  }
+
+  const segmentColor = (conf: number) =>
+    conf >= 0.8 ? 'text-zinc-100' : conf >= 0.6 ? 'text-yellow-300' : 'text-red-400'
+
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const hasColoredWords = segments.some((s) => s.confidence < 0.8)
 
   return (
     <div className="max-w-2xl space-y-8">
       <div>
         <h1 className="text-2xl font-bold mb-1">Self Video</h1>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Record yourself on camera to review your body language, eye contact, and expressions.
-          Your speech is transcribed so you can paste it into Claude or ChatGPT for English feedback.
+          Record yourself on camera to review body language and expressions. Words are color-coded
+          by clarity, and you can check grammar for free after each recording.
         </p>
       </div>
 
-      {/* Camera preview */}
+      {/* Camera preview — mirrored so it feels like a mirror */}
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden relative"
         style={{ aspectRatio: '4/3' }}
       >
-        {/* Preview is mirrored — feels natural like a mirror */}
         <video
           ref={videoRef}
           autoPlay
@@ -187,37 +234,65 @@ export default function CameraPage() {
         )}
       </div>
 
-      {/* Live transcript */}
-      {(recording || (transcript && streaming)) && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-3">
-          <div className="flex items-center justify-between">
+      {/* Live transcript while recording */}
+      {(recording || (segments.length > 0 && streaming)) && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-3">
             <span className="text-xs text-zinc-500 uppercase tracking-widest">Live Transcript</span>
-            {transcript && (
+            {fullText && (
               <button
-                onClick={() => navigator.clipboard.writeText(transcript)}
+                onClick={() => navigator.clipboard.writeText(fullText)}
                 className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 Copy
               </button>
             )}
           </div>
-          {!transcript && !interim ? (
+          {!segments.length && !interim ? (
             <p className="text-zinc-600 text-sm italic">Listening — start speaking…</p>
           ) : (
-            <p className="text-zinc-100 leading-relaxed">
-              {transcript}
+            <p className="leading-relaxed">
+              {segments.map((seg, i) => (
+                <span
+                  key={i}
+                  className={segmentColor(seg.confidence)}
+                  title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
+                >
+                  {seg.text}
+                </span>
+              ))}
               <span className="text-zinc-500 italic">{interim}</span>
             </p>
           )}
         </div>
       )}
 
-      {/* Playback + transcript after recording */}
+      {/* Playback section */}
       {videoUrl && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-5">
           <span className="text-xs text-zinc-500 uppercase tracking-widest">Your Recording</span>
-          {/* Playback is NOT mirrored — shows how others see you */}
-          <video controls src={videoUrl} className="w-full mt-2 rounded-lg" />
+
+          {/* Playback is NOT mirrored — see yourself as others see you */}
+          <video ref={playbackRef} controls src={videoUrl} className="w-full mt-2 rounded-lg" />
+
+          {/* Speed control */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-zinc-600 mr-1">Playback speed:</span>
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                onClick={() => applySpeed(s)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  playbackSpeed === s
+                    ? 'bg-zinc-500 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+
           <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => {
@@ -230,9 +305,9 @@ export default function CameraPage() {
             >
               Download video
             </button>
-            {transcript && (
+            {fullText && (
               <button
-                onClick={() => navigator.clipboard.writeText(transcript)}
+                onClick={() => navigator.clipboard.writeText(fullText)}
                 className="text-sm px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
               >
                 Copy transcript
@@ -240,41 +315,85 @@ export default function CameraPage() {
             )}
           </div>
 
-          {transcript && (
-            <div className="border-t border-zinc-800 pt-4 space-y-2">
-              <span className="text-xs text-zinc-500 uppercase tracking-widest">Transcript</span>
-              <p className="text-zinc-300 text-sm leading-relaxed mt-2">{transcript}</p>
+          {/* Transcript with confidence colors */}
+          {fullText && (
+            <div className="border-t border-zinc-800 pt-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-500 uppercase tracking-widest">Transcript</span>
+                <button
+                  onClick={checkGrammar}
+                  disabled={grammarStatus === 'checking'}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-lg text-xs font-medium transition-colors"
+                >
+                  {grammarStatus === 'checking' ? 'Checking…' : 'Check Grammar (free)'}
+                </button>
+              </div>
+              <p className="text-sm leading-relaxed">
+                {segments.map((seg, i) => (
+                  <span
+                    key={i}
+                    className={segmentColor(seg.confidence)}
+                    title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
+                  >
+                    {seg.text}
+                  </span>
+                ))}
+              </p>
+              {hasColoredWords && (
+                <div className="flex gap-4">
+                  <span className="text-xs text-zinc-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-zinc-100 inline-block" /> Clear
+                  </span>
+                  <span className="text-xs text-yellow-300 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-yellow-300 inline-block" /> Uncertain
+                  </span>
+                  <span className="text-xs text-red-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> Unclear
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* AI feedback prompt hint */}
-      {transcript && !recording && (
-        <div className="bg-indigo-950/40 border border-indigo-800/40 rounded-xl p-5 space-y-3">
-          <p className="text-sm font-semibold text-indigo-300">Get AI feedback on your English</p>
-          <p className="text-sm text-indigo-400/80 leading-relaxed">
-            Copy your transcript and paste it into Claude or ChatGPT. Ask it to correct your
-            grammar, suggest better words, or explain what you could say more naturally.
-          </p>
-          <div className="bg-indigo-950/60 rounded-lg p-3 border border-indigo-900/50">
-            <p className="text-xs text-indigo-400 font-mono leading-relaxed">
-              &ldquo;Here is what I said in English. Please correct any grammar mistakes,
-              suggest more natural phrases, and explain the corrections:
-              <br /><br />
-              [paste your transcript here]&rdquo;
-            </p>
+      {/* Grammar results */}
+      {grammarStatus === 'done' && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500 uppercase tracking-widest">Grammar Feedback</span>
+            <span className="text-xs text-zinc-700">LanguageTool — free</span>
           </div>
-          <button
-            onClick={() =>
-              navigator.clipboard.writeText(
-                `Here is what I said in English. Please correct any grammar mistakes, suggest more natural phrases, and explain the corrections:\n\n${transcript}`
-              )
-            }
-            className="text-sm px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg transition-colors font-medium"
-          >
-            Copy prompt + transcript
-          </button>
+          {grammarMatches.length === 0 ? (
+            <p className="text-green-400 text-sm font-medium">
+              No issues found — your English looks great!
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {grammarMatches.map((match, i) => {
+                const errorText = fullText.slice(match.offset, match.offset + match.length)
+                const suggestion = match.replacements[0]?.value
+                return (
+                  <div key={i} className="bg-zinc-800/60 rounded-lg p-4 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm bg-red-950/50 text-red-300 px-2 py-0.5 rounded border border-red-900/50">
+                        {errorText || '…'}
+                      </span>
+                      {suggestion && (
+                        <>
+                          <span className="text-zinc-600">&rarr;</span>
+                          <span className="font-mono text-sm bg-green-950/50 text-green-300 px-2 py-0.5 rounded border border-green-900/50">
+                            {suggestion}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-sm text-zinc-400">{match.message}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

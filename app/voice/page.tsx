@@ -2,13 +2,25 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 
+type Segment = { text: string; confidence: number }
+type GrammarStatus = 'idle' | 'checking' | 'done'
+
+interface LTMatch {
+  message: string
+  offset: number
+  length: number
+  replacements: { value: string }[]
+}
+
 export default function VoicePage() {
   const [recording, setRecording] = useState(false)
-  const [transcript, setTranscript] = useState('')
+  const [segments, setSegments] = useState<Segment[]>([])
   const [interim, setInterim] = useState('')
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [speechSupported, setSpeechSupported] = useState(true)
+  const [grammarStatus, setGrammarStatus] = useState<GrammarStatus>('idle')
+  const [grammarMatches, setGrammarMatches] = useState<LTMatch[]>([])
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
@@ -20,15 +32,14 @@ export default function VoicePage() {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
   }, [])
 
+  const fullText = segments.map((s) => s.text).join('')
+
   const start = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-
       const recorder = new MediaRecorder(stream)
       chunksRef.current = []
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setAudioUrl(URL.createObjectURL(blob))
@@ -44,31 +55,33 @@ export default function VoicePage() {
         recognition.continuous = true
         recognition.interimResults = true
         recognition.lang = 'en-US'
-
         recognition.onresult = (e) => {
-          let final = ''
           let inter = ''
           for (let i = e.resultIndex; i < e.results.length; i++) {
-            if (e.results[i].isFinal) final += e.results[i][0].transcript + ' '
-            else inter += e.results[i][0].transcript
+            const r = e.results[i]
+            if (r.isFinal) {
+              const conf = r[0].confidence > 0 ? r[0].confidence : 0.9
+              const clean = r[0].transcript.replace(/[.,!?;:]/g, '').trim()
+              if (clean) setSegments((prev) => [...prev, { text: clean + ' ', confidence: conf }])
+            } else {
+              inter += r[0].transcript
+            }
           }
-          if (final) setTranscript((t) => t + final)
           setInterim(inter)
         }
         recognition.onend = () => {
-          if (recognizingRef.current) {
-            try { recognition.start() } catch (_) { /* already restarting */ }
-          } else {
-            setInterim('')
-          }
+          if (recognizingRef.current) { try { recognition.start() } catch (_) {} }
+          else setInterim('')
         }
         recognition.start()
         recognitionRef.current = recognition
       }
 
       setElapsed(0)
-      setTranscript('')
+      setSegments([])
       setAudioUrl(null)
+      setGrammarStatus('idle')
+      setGrammarMatches([])
       timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
       setRecording(true)
     } catch (_) {
@@ -84,19 +97,42 @@ export default function VoicePage() {
     setRecording(false)
   }, [])
 
-  const fmt = (s: number) =>
-    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const checkGrammar = async () => {
+    const text = fullText.trim()
+    if (!text) return
+    setGrammarStatus('checking')
+    try {
+      const res = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ language: 'en-US', text }).toString(),
+      })
+      const data: { matches: LTMatch[] } = await res.json()
+      setGrammarMatches(data.matches || [])
+      setGrammarStatus('done')
+    } catch (_) {
+      setGrammarStatus('idle')
+      alert('Grammar check failed. Please check your internet connection.')
+    }
+  }
+
+  const segmentColor = (conf: number) =>
+    conf >= 0.8 ? 'text-zinc-100' : conf >= 0.6 ? 'text-yellow-300' : 'text-red-400'
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const hasColoredWords = segments.some((s) => s.confidence < 0.8)
 
   return (
     <div className="max-w-2xl space-y-8">
       <div>
         <h1 className="text-2xl font-bold mb-1">Voice Recorder</h1>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Record yourself speaking English and see your words written out in real time.
-          Great for practicing pronunciation and fluency.
+          Record yourself speaking English. Unclear words are highlighted — yellow means uncertain,
+          red means unclear. Check grammar for free after recording.
         </p>
       </div>
 
+      {/* Record button */}
       <div className="flex flex-col items-center gap-4 py-10">
         <button
           onClick={recording ? stop : start}
@@ -115,39 +151,112 @@ export default function VoicePage() {
         )}
       </div>
 
+      {/* Transcript */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 min-h-48">
         <div className="flex items-center justify-between mb-4">
           <span className="text-xs text-zinc-500 uppercase tracking-widest">Transcript</span>
-          {(transcript || interim) && (
+          {fullText && (
             <button
-              onClick={() => navigator.clipboard.writeText(transcript)}
+              onClick={() => navigator.clipboard.writeText(fullText)}
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
               Copy
             </button>
           )}
         </div>
-        {!transcript && !interim ? (
+        {!segments.length && !interim ? (
           <p className="text-zinc-600 text-sm italic">
             {recording ? 'Listening — start speaking…' : 'Your words will appear here when you record.'}
           </p>
         ) : (
-          <p className="text-zinc-100 leading-relaxed text-base">
-            {transcript}
+          <p className="leading-relaxed text-base">
+            {segments.map((seg, i) => (
+              <span
+                key={i}
+                className={segmentColor(seg.confidence)}
+                title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
+              >
+                {seg.text}
+              </span>
+            ))}
             <span className="text-zinc-500 italic">{interim}</span>
           </p>
         )}
+        {hasColoredWords && !recording && (
+          <div className="flex gap-4 mt-4 pt-3 border-t border-zinc-800">
+            <span className="text-xs text-zinc-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-zinc-100 inline-block" /> Clear
+            </span>
+            <span className="text-xs text-yellow-300 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-yellow-300 inline-block" /> Uncertain
+            </span>
+            <span className="text-xs text-red-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> Unclear
+            </span>
+          </div>
+        )}
       </div>
 
-      {transcript && (
-        <button
-          onClick={() => { setTranscript(''); setAudioUrl(null) }}
-          className="text-sm text-zinc-600 hover:text-zinc-400 transition-colors"
-        >
-          Clear transcript
-        </button>
+      {/* Actions */}
+      {fullText && !recording && (
+        <div className="flex gap-3 flex-wrap items-center">
+          <button
+            onClick={checkGrammar}
+            disabled={grammarStatus === 'checking'}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-lg text-sm font-medium transition-colors"
+          >
+            {grammarStatus === 'checking' ? 'Checking…' : 'Check Grammar (free)'}
+          </button>
+          <button
+            onClick={() => { setSegments([]); setAudioUrl(null); setGrammarStatus('idle'); setGrammarMatches([]) }}
+            className="text-sm text-zinc-600 hover:text-zinc-400 transition-colors"
+          >
+            Clear
+          </button>
+        </div>
       )}
 
+      {/* Grammar results */}
+      {grammarStatus === 'done' && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500 uppercase tracking-widest">Grammar Feedback</span>
+            <span className="text-xs text-zinc-700">LanguageTool — free</span>
+          </div>
+          {grammarMatches.length === 0 ? (
+            <p className="text-green-400 text-sm font-medium">
+              No issues found — your English looks great!
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {grammarMatches.map((match, i) => {
+                const errorText = fullText.slice(match.offset, match.offset + match.length)
+                const suggestion = match.replacements[0]?.value
+                return (
+                  <div key={i} className="bg-zinc-800/60 rounded-lg p-4 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm bg-red-950/50 text-red-300 px-2 py-0.5 rounded border border-red-900/50">
+                        {errorText || '…'}
+                      </span>
+                      {suggestion && (
+                        <>
+                          <span className="text-zinc-600">&rarr;</span>
+                          <span className="font-mono text-sm bg-green-950/50 text-green-300 px-2 py-0.5 rounded border border-green-900/50">
+                            {suggestion}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-sm text-zinc-400">{match.message}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Audio playback */}
       {audioUrl && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
           <span className="text-xs text-zinc-500 uppercase tracking-widest">Playback</span>

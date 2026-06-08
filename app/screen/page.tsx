@@ -2,15 +2,24 @@
 
 import { useState, useRef } from 'react'
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5]
+
 export default function ScreenPage() {
   const [capturing, setCapturing] = useState(false)
   const [recording, setRecording] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [playbackSpeed, setPlaybackSpeed] = useState(1)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const playbackRef = useRef<HTMLVideoElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
+
+  const applySpeed = (speed: number) => {
+    setPlaybackSpeed(speed)
+    if (playbackRef.current) playbackRef.current.playbackRate = speed
+  }
 
   const stopAll = (stopRecorder = true) => {
     if (stopRecorder && recorderRef.current?.state === 'recording') {
@@ -138,7 +147,23 @@ export default function ScreenPage() {
       {videoUrl && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
           <span className="text-xs text-zinc-500 uppercase tracking-widest">Recording</span>
-          <video controls src={videoUrl} className="w-full mt-2 rounded-lg" />
+          <video ref={playbackRef} controls src={videoUrl} className="w-full mt-2 rounded-lg" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-zinc-600 mr-1">Playback speed:</span>
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                onClick={() => applySpeed(s)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  playbackSpeed === s
+                    ? 'bg-zinc-500 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => {
               const a = document.createElement('a')
