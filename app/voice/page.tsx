@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { analyzeTranscript, type AnalysisResult } from '@/lib/analyze'
 
 type Segment = { text: string; confidence: number }
 type GrammarStatus = 'idle' | 'checking' | 'done'
+type AnalyzeStatus = 'idle' | 'done'
 
 interface LTMatch {
   message: string
@@ -21,12 +23,15 @@ export default function VoicePage() {
   const [speechSupported, setSpeechSupported] = useState(true)
   const [grammarStatus, setGrammarStatus] = useState<GrammarStatus>('idle')
   const [grammarMatches, setGrammarMatches] = useState<LTMatch[]>([])
+  const [analyzeStatus, setAnalyzeStatus] = useState<AnalyzeStatus>('idle')
+  const [analyzeResult, setAnalyzeResult] = useState<AnalysisResult | null>(null)
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const recognizingRef = useRef(false)
+  const interimRef = useRef('')
 
   useEffect(() => {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
@@ -48,6 +53,17 @@ export default function VoicePage() {
       recorder.start()
       recorderRef.current = recorder
 
+      // Reset all state before starting recognition
+      setElapsed(0)
+      setSegments([])
+      setAudioUrl(null)
+      setGrammarStatus('idle')
+      setGrammarMatches([])
+      setAnalyzeStatus('idle')
+      setAnalyzeResult(null)
+      interimRef.current = ''
+      setInterim('')
+
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition
       if (SR) {
         recognizingRef.current = true
@@ -67,21 +83,26 @@ export default function VoicePage() {
               inter += r[0].transcript
             }
           }
+          interimRef.current = inter
           setInterim(inter)
         }
         recognition.onend = () => {
-          if (recognizingRef.current) { try { recognition.start() } catch (_) {} }
-          else setInterim('')
+          if (recognizingRef.current) {
+            // Save any interim words before the engine resets — prevents word loss during the ~60s restart
+            const leftover = interimRef.current.replace(/[.,!?;:]/g, '').trim()
+            if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8 }])
+            interimRef.current = ''
+            setInterim('')
+            try { recognition.start() } catch (_) {}
+          } else {
+            interimRef.current = ''
+            setInterim('')
+          }
         }
         recognition.start()
         recognitionRef.current = recognition
       }
 
-      setElapsed(0)
-      setSegments([])
-      setAudioUrl(null)
-      setGrammarStatus('idle')
-      setGrammarMatches([])
       timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
       setRecording(true)
     } catch (_) {
@@ -91,10 +112,15 @@ export default function VoicePage() {
 
   const stop = useCallback(() => {
     recognizingRef.current = false
+    // Capture any words still in interim before stopping
+    const leftover = interimRef.current.replace(/[.,!?;:]/g, '').trim()
+    if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8 }])
+    interimRef.current = ''
     recorderRef.current?.stop()
     recognitionRef.current?.stop()
     if (timerRef.current) clearInterval(timerRef.current)
     setRecording(false)
+    setInterim('')
   }, [])
 
   const checkGrammar = async () => {
@@ -116,11 +142,29 @@ export default function VoicePage() {
     }
   }
 
+  const checkFluency = () => {
+    const text = fullText.trim()
+    if (text.split(/\s+/).filter(Boolean).length < 5) {
+      alert('Transcript is too short. Record at least a few sentences first.')
+      return
+    }
+    const result = analyzeTranscript(text, elapsed)
+    setAnalyzeResult(result)
+    setAnalyzeStatus('done')
+  }
+
   const segmentColor = (conf: number) =>
     conf >= 0.8 ? 'text-zinc-100' : conf >= 0.6 ? 'text-yellow-300' : 'text-red-400'
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const hasColoredWords = segments.some((s) => s.confidence < 0.8)
+
+  const scoreColor = (score: number) =>
+    score >= 8
+      ? 'bg-green-950/60 text-green-400 border-green-900/50'
+      : score >= 5
+      ? 'bg-amber-950/60 text-amber-400 border-amber-900/50'
+      : 'bg-red-950/60 text-red-400 border-red-900/50'
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -128,7 +172,7 @@ export default function VoicePage() {
         <h1 className="text-2xl font-bold mb-1">Voice Recorder</h1>
         <p className="text-zinc-400 text-sm leading-relaxed">
           Record yourself speaking English. Unclear words are highlighted — yellow means uncertain,
-          red means unclear. Check grammar for free after recording.
+          red means unclear. Check grammar and fluency after recording.
         </p>
       </div>
 
@@ -208,7 +252,20 @@ export default function VoicePage() {
             {grammarStatus === 'checking' ? 'Checking…' : 'Check Grammar (free)'}
           </button>
           <button
-            onClick={() => { setSegments([]); setAudioUrl(null); setGrammarStatus('idle'); setGrammarMatches([]) }}
+            onClick={checkFluency}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            Check Fluency & Pronunciation
+          </button>
+          <button
+            onClick={() => {
+              setSegments([])
+              setAudioUrl(null)
+              setGrammarStatus('idle')
+              setGrammarMatches([])
+              setAnalyzeStatus('idle')
+              setAnalyzeResult(null)
+            }}
             className="text-sm text-zinc-600 hover:text-zinc-400 transition-colors"
           >
             Clear
@@ -253,6 +310,74 @@ export default function VoicePage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Fluency & Pronunciation results */}
+      {analyzeStatus === 'done' && analyzeResult && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500 uppercase tracking-widest">Fluency & Pronunciation</span>
+            <span className="text-xs text-zinc-700">Claude AI</span>
+          </div>
+
+          {/* Score + WPM + feedback */}
+          <div className="flex items-start gap-4">
+            <div className="flex flex-col gap-2 flex-shrink-0">
+              <div
+                className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${scoreColor(analyzeResult.fluencyScore)}`}
+              >
+                <span className="text-xl font-bold leading-none">{analyzeResult.fluencyScore}</span>
+                <span className="text-xs opacity-70">/10</span>
+              </div>
+              {analyzeResult.wpm !== null && (
+                <div className="w-14 h-8 rounded-lg flex items-center justify-center bg-zinc-800 border border-zinc-700">
+                  <span className="text-xs text-zinc-400 font-mono leading-none">{analyzeResult.wpm}<span className="text-zinc-600"> wpm</span></span>
+                </div>
+              )}
+            </div>
+            <p className="text-sm text-zinc-300 leading-relaxed pt-1">{analyzeResult.fluencyFeedback}</p>
+          </div>
+
+          {/* Pronunciation watch-list */}
+          {analyzeResult.pronunciationTips.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-widest">Pronunciation Watch-list</span>
+              <div className="space-y-2 mt-2">
+                {analyzeResult.pronunciationTips.map((tip, i) => (
+                  <div key={i} className="bg-zinc-800/60 rounded-lg p-4 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm bg-amber-950/50 text-amber-300 px-2 py-0.5 rounded border border-amber-900/50">
+                        {tip.word}
+                      </span>
+                      <span className="text-zinc-600">&rarr;</span>
+                      <span className="text-sm text-zinc-400 font-mono">{tip.phonetic}</span>
+                    </div>
+                    <p className="text-sm text-zinc-400">{tip.tip}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Improvements */}
+          {analyzeResult.improvements.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-widest">Top Improvements</span>
+              <ul className="space-y-2 mt-2">
+                {analyzeResult.improvements.map((imp, i) => (
+                  <li key={i} className="flex gap-2 text-sm text-zinc-300">
+                    <span className="text-violet-400 mt-0.5 flex-shrink-0">•</span>
+                    <span>{imp}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="text-xs text-zinc-600 border-t border-zinc-800 pt-3">
+            Note: browser speech recognition removes filler words (um, uh, like) from transcripts. Play back your recording to check for hesitations.
+          </p>
         </div>
       )}
 
