@@ -180,7 +180,10 @@ export default function CameraPage() {
       alert('Transcript is too short. Record at least a few sentences first.')
       return
     }
-    const result = analyzeTranscript(text, elapsed)
+    const result = analyzeTranscript(text, elapsed, {
+      segments,
+      grammarMatches: grammarStatus === 'done' ? grammarMatches : undefined,
+    })
     setAnalyzeResult(result)
     setAnalyzeStatus('done')
   }
@@ -195,13 +198,6 @@ export default function CameraPage() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const hasColoredWords = segments.some((s) => s.confidence < 0.8)
-
-  const scoreColor = (score: number) =>
-    score >= 8
-      ? 'bg-green-950/60 text-green-400 border-green-900/50'
-      : score >= 5
-      ? 'bg-amber-950/60 text-amber-400 border-amber-900/50'
-      : 'bg-red-950/60 text-red-400 border-red-900/50'
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -450,31 +446,101 @@ export default function CameraPage() {
         </div>
       )}
 
-      {/* Fluency & Pronunciation results */}
+      {/* Full analysis results */}
       {analyzeStatus === 'done' && analyzeResult && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-5">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-6">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-500 uppercase tracking-widest">Fluency & Pronunciation</span>
-            <span className="text-xs text-zinc-700">Claude AI</span>
+            <span className="text-xs text-zinc-500 uppercase tracking-widest">Analysis Results</span>
+            {analyzeResult.wpm !== null && (
+              <span className="text-xs text-zinc-500 font-mono">{analyzeResult.wpm} wpm</span>
+            )}
           </div>
 
-          {/* Score + WPM + feedback */}
-          <div className="flex items-start gap-4">
-            <div className="flex flex-col gap-2 flex-shrink-0">
-              <div
-                className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${scoreColor(analyzeResult.fluencyScore)}`}
-              >
-                <span className="text-xl font-bold leading-none">{analyzeResult.fluencyScore}</span>
-                <span className="text-xs opacity-70">/10</span>
+          {/* Score grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {(
+              [
+                { label: 'Vocabulary',    score: analyzeResult.scores.vocabulary },
+                { label: 'Grammar',       score: analyzeResult.scores.grammar },
+                { label: 'Fluency',       score: analyzeResult.scores.fluency },
+                { label: 'Pronunciation', score: analyzeResult.scores.pronunciation },
+                { label: 'Confidence',    score: analyzeResult.scores.confidence },
+              ] as const
+            ).map(({ label, score }) => (
+              <div key={label} className="bg-zinc-800/60 rounded-lg p-3 space-y-2">
+                <span className="text-xs text-zinc-500">{label}</span>
+                {score !== null ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-zinc-700 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${
+                          score >= 8 ? 'bg-green-500' : score >= 5 ? 'bg-amber-500' : 'bg-red-500'
+                        }`}
+                        style={{ width: `${score * 10}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-semibold text-zinc-200 tabular-nums w-8 text-right">{score}/10</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-600">
+                    {label === 'Grammar' ? 'Run Grammar Check first' : '—'}
+                  </p>
+                )}
               </div>
-              {analyzeResult.wpm !== null && (
-                <div className="w-14 h-8 rounded-lg flex items-center justify-center bg-zinc-800 border border-zinc-700">
-                  <span className="text-xs text-zinc-400 font-mono leading-none">{analyzeResult.wpm}<span className="text-zinc-600"> wpm</span></span>
-                </div>
-              )}
-            </div>
-            <p className="text-sm text-zinc-300 leading-relaxed pt-1">{analyzeResult.fluencyFeedback}</p>
+            ))}
           </div>
+
+          {/* Fluency feedback */}
+          <p className="text-sm text-zinc-300 leading-relaxed">{analyzeResult.fluencyFeedback}</p>
+
+          {/* Filler words */}
+          {analyzeResult.fillerWords.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-widest">Filler Words Detected</span>
+              <div className="space-y-1.5 mt-2">
+                {analyzeResult.fillerWords.map(({ word, count }) => {
+                  const maxCount = analyzeResult.fillerWords[0].count
+                  return (
+                    <div key={word} className="flex items-center gap-3">
+                      <span className="text-sm text-zinc-300 font-mono w-20 shrink-0">{word}</span>
+                      <div className="flex-1 bg-zinc-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-2 rounded-full bg-orange-500/70"
+                          style={{ width: `${(count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-zinc-500 w-8 text-right shrink-0">{count}×</span>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-zinc-600">&quot;like&quot;, &quot;just&quot;, &quot;well&quot; may include legitimate uses — listen to your recording to confirm. &quot;um&quot; and &quot;uh&quot; are removed by the browser and cannot be counted here.</p>
+            </div>
+          )}
+
+          {/* Top repeated words */}
+          {analyzeResult.topRepeatedWords.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-widest">Most Repeated Words</span>
+              <div className="space-y-1.5 mt-2">
+                {analyzeResult.topRepeatedWords.map(({ word, count }) => {
+                  const maxCount = analyzeResult.topRepeatedWords[0].count
+                  return (
+                    <div key={word} className="flex items-center gap-3">
+                      <span className="text-sm text-zinc-300 font-mono w-20 shrink-0">{word}</span>
+                      <div className="flex-1 bg-zinc-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-2 rounded-full bg-blue-500/70"
+                          style={{ width: `${(count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-zinc-500 w-8 text-right shrink-0">{count}×</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Pronunciation watch-list */}
           {analyzeResult.pronunciationTips.length > 0 && (
@@ -504,17 +570,13 @@ export default function CameraPage() {
               <ul className="space-y-2 mt-2">
                 {analyzeResult.improvements.map((imp, i) => (
                   <li key={i} className="flex gap-2 text-sm text-zinc-300">
-                    <span className="text-violet-400 mt-0.5 flex-shrink-0">•</span>
+                    <span className="text-violet-400 mt-0.5 shrink-0">•</span>
                     <span>{imp}</span>
                   </li>
                 ))}
               </ul>
             </div>
           )}
-
-          <p className="text-xs text-zinc-600 border-t border-zinc-800 pt-3">
-            Note: browser speech recognition removes filler words (um, uh, like) from transcripts. Play back your recording to check for hesitations.
-          </p>
         </div>
       )}
 
