@@ -46,6 +46,11 @@ export default function CameraPage() {
   }, [])
 
   const fullText = segments.map((s) => s.text).join('')
+  const fullTextWithTimestamps = segments.map((s) => {
+    const m = Math.floor(s.timestamp / 60)
+    const ss = String(s.timestamp % 60).padStart(2, '0')
+    return `[${m}:${ss}] ${s.text.trim()}`
+  }).join('\n')
 
   const startCamera = useCallback(async () => {
     try {
@@ -104,40 +109,50 @@ export default function CameraPage() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (SR) {
       recognizingRef.current = true
-      const recognition = new SR()
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.lang = 'en-US'
-      recognition.onresult = (e) => {
-        let inter = ''
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const r = e.results[i]
-          if (r.isFinal) {
-            const conf = r[0].confidence > 0 ? r[0].confidence : 0.9
-            const text = r[0].transcript.trim()
-            if (text) setSegments((prev) => [...prev, { text: text + ' ', confidence: conf, timestamp: elapsedRef.current }])
+
+      const startRecognition = () => {
+        if (!recognizingRef.current) return
+        const recognition = new SR()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = 'en-US'
+        recognition.onresult = (e) => {
+          let inter = ''
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i]
+            if (r.isFinal) {
+              const conf = r[0].confidence > 0 ? r[0].confidence : 0.9
+              const text = r[0].transcript.trim()
+              if (text) setSegments((prev) => [...prev, { text: text + ' ', confidence: conf, timestamp: elapsedRef.current }])
+            } else {
+              inter += r[0].transcript
+            }
+          }
+          interimRef.current = inter
+          setInterim(inter)
+        }
+        recognition.onend = () => {
+          if (recognizingRef.current) {
+            const leftover = interimRef.current.trim()
+            if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8, timestamp: elapsedRef.current }])
+            interimRef.current = ''
+            setInterim('')
+            startRecognition()
           } else {
-            inter += r[0].transcript
+            interimRef.current = ''
+            setInterim('')
           }
         }
-        interimRef.current = inter
-        setInterim(inter)
-      }
-      recognition.onend = () => {
-        if (recognizingRef.current) {
-          // Save any interim words before the engine resets — prevents word loss during the ~60s restart
-          const leftover = interimRef.current.trim()
-          if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8, timestamp: elapsedRef.current }])
-          interimRef.current = ''
-          setInterim('')
-          try { recognition.start() } catch (_) {}
-        } else {
-          interimRef.current = ''
-          setInterim('')
+        recognition.onerror = () => {
+          if (recognizingRef.current) setTimeout(startRecognition, 300)
         }
+        try {
+          recognition.start()
+          recognitionRef.current = recognition
+        } catch (_) {}
       }
-      recognition.start()
-      recognitionRef.current = recognition
+
+      startRecognition()
     }
 
     timerRef.current = setInterval(() => { elapsedRef.current += 1; setElapsed((s) => s + 1) }, 1000)
@@ -293,10 +308,10 @@ export default function CameraPage() {
             <span className="text-xs text-zinc-500 uppercase tracking-widest">Live Transcript</span>
             {fullText && (
               <button
-                onClick={() => navigator.clipboard.writeText(fullText)}
+                onClick={() => navigator.clipboard.writeText(fullTextWithTimestamps)}
                 className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
               >
-                Copy
+                Copy with timestamps
               </button>
             )}
           </div>
@@ -362,10 +377,10 @@ export default function CameraPage() {
             </button>
             {fullText && (
               <button
-                onClick={() => navigator.clipboard.writeText(fullText)}
+                onClick={() => navigator.clipboard.writeText(fullTextWithTimestamps)}
                 className="text-sm px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
               >
-                Copy transcript
+                Copy transcript with timestamps
               </button>
             )}
           </div>
@@ -439,6 +454,10 @@ export default function CameraPage() {
               {grammarMatches.map((match, i) => {
                 const errorText = fullText.slice(match.offset, match.offset + match.length)
                 const suggestion = match.replacements[0]?.value
+                const snippetStart = Math.max(0, match.offset - 55)
+                const snippetEnd = Math.min(fullText.length, match.offset + match.length + 55)
+                const before = fullText.slice(snippetStart, match.offset)
+                const after = fullText.slice(match.offset + match.length, snippetEnd)
                 return (
                   <div key={i} className="bg-zinc-800/60 rounded-lg p-4 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -455,6 +474,15 @@ export default function CameraPage() {
                         </>
                       )}
                     </div>
+                    {errorText && (
+                      <p className="text-xs font-mono text-zinc-500 bg-zinc-900/70 rounded px-3 py-2 leading-relaxed">
+                        {snippetStart > 0 && <span>…</span>}
+                        {before}
+                        <mark className="bg-red-900/60 text-red-200 rounded px-0.5">{errorText}</mark>
+                        {after}
+                        {snippetEnd < fullText.length && <span>…</span>}
+                      </p>
+                    )}
                     <p className="text-sm text-zinc-400">{match.message}</p>
                   </div>
                 )

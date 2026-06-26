@@ -224,15 +224,24 @@ export function analyzeTranscript(
   // ── FLUENCY FEEDBACK ──────────────────────────────────────────────
   const parts: string[] = []
   if (wpm !== null) {
-    if (wpm < 90) parts.push(`Your pace is slow (${wpm} wpm) — native speakers typically speak at 130–170 wpm.`)
-    else if (wpm > 200) parts.push(`You are speaking fast (${wpm} wpm). A slightly slower pace will improve clarity.`)
-    else parts.push(`Your speaking pace (${wpm} wpm) is in a natural, native-speaker range.`)
+    if (wpm < 90) parts.push(`Your pace is quite slow at ${wpm} wpm. Native speakers average 130–170 wpm — try practising with a timer, speaking the same sentence faster each round.`)
+    else if (wpm >= 90 && wpm < 115) parts.push(`Your pace (${wpm} wpm) is a little below natural — aim for 130 wpm for conversational flow. Daily shadowing helps a lot.`)
+    else if (wpm >= 115 && wpm <= 180) parts.push(`Your speaking pace (${wpm} wpm) is natural and easy to follow — well done.`)
+    else parts.push(`You are speaking quickly at ${wpm} wpm. Slowing down slightly will give listeners time to process your ideas.`)
   }
-  if (avgWords < 6) parts.push('Your sentences are short — try connecting ideas into longer, more flowing phrases.')
-  else if (avgWords > 25) parts.push('Your sentences are very long. Breaking them up will improve clarity.')
-  else parts.push('Your sentence length sounds natural.')
-  if (vocabRatio < 0.4 && wordCount > 30) parts.push('You repeat several words often — a wider vocabulary range will make your speech richer.')
-  const fluencyFeedback = parts.slice(0, 2).join(' ')
+  if (avgWords < 5) parts.push(`Your sentences average only ${Math.round(avgWords)} words — very short. Join ideas using "because", "which means", "so" or "even though" to sound more fluent.`)
+  else if (avgWords < 9) parts.push(`Sentence length averages ${Math.round(avgWords)} words — a little short. Try extending your ideas instead of stopping at simple statements.`)
+  else if (avgWords > 25) parts.push(`Your sentences average ${Math.round(avgWords)} words — very long. Split ideas at natural pauses to improve clarity.`)
+  else parts.push(`Your sentence length (around ${Math.round(avgWords)} words) sounds natural and well-structured.`)
+  if (usedConnectors.length === 0) {
+    parts.push('You did not use any linking words. Phrases like "however", "because of this", "for example", or "on the other hand" help your speech sound organised.')
+  } else if (usedConnectors.length >= 3) {
+    parts.push(`Good use of linking language: "${usedConnectors.slice(0, 3).join('", "')}". This makes your speech easier to follow.`)
+  } else {
+    parts.push(`You used ${usedConnectors.length} linking word — try adding more variety such as "however", "therefore", or "for instance".`)
+  }
+  if (vocabRatio < 0.4 && wordCount > 30) parts.push('You repeat the same words quite often. Before your next recording, note 2 synonyms for your most-used words and try to use them.')
+  const fluencyFeedback = parts.join(' ')
 
   // ── FILLER WORDS ──────────────────────────────────────────────────
   const fillerWords = FILLER_PATTERNS
@@ -271,26 +280,26 @@ export function analyzeTranscript(
 
   // ── IMPROVEMENTS ──────────────────────────────────────────────────
   const improvements: string[] = []
-  if (wpm !== null && wpm < 100) {
-    improvements.push('Practice reading aloud and time yourself. Build up to 130 wpm — your brain will naturally produce faster, more fluid speech.')
+  if (wpm !== null && wpm < 110) {
+    improvements.push(`Your pace (${wpm} wpm) is below natural speech. Daily: pick any paragraph, read it aloud, record yourself, then repeat 3 times trying to go slightly faster each time without losing clarity.`)
   }
   if (usedConnectors.length === 0) {
-    improvements.push('Link ideas with discourse markers: "however", "because of this", "which means that", "for example". They make speech sound organised and native-like.')
+    improvements.push('You are not using linking words yet. Practice this sentence template: "[Point]. This is because [reason]. For example, [example]. However, [contrast]." Use it every day until it becomes automatic.')
   }
   if (vocabRatio < 0.45 && wordCount > 30) {
-    improvements.push('You repeat the same words often. Before recording, brainstorm 2 synonyms for the words you use most.')
+    improvements.push('High word repetition detected. Before your next recording, write down 3 words you always use and find 2 synonyms for each. Challenge yourself to avoid the repeated word entirely.')
   }
   if (avgWords < 6) {
-    improvements.push('Practice speaking in longer connected sentences. Instead of "It was good. I liked it." try "I really liked it because it felt natural and easy to follow."')
+    improvements.push('Your sentences are too short for fluent English. Instead of "It was good. I liked it." say "I really liked it because it felt natural and easy to follow, especially the second part." Aim to extend every sentence with a reason or example.')
   }
   if (improvements.length < 3) {
-    improvements.push('Shadow native speakers: find a 30-second clip, listen once, then speak along matching their exact rhythm, stress, and intonation. Repeat 5 times.')
+    improvements.push('Shadow a native speaker: find a 30-second YouTube clip, listen once, then speak along matching their exact rhythm, stress, and intonation. Do this 5 times a day — it trains your mouth muscles and builds fluency faster than any other method.')
   }
   if (improvements.length < 3) {
-    improvements.push('In natural English, words link and reduce: "want to" → "wanna", "have to" → "hafta". Practise these reductions consciously.')
+    improvements.push('In natural English, words blend together: "want to" sounds like "wanna", "going to" like "gonna", "have to" like "hafta". Practise these contractions — using them makes you sound far more natural.')
   }
   if (improvements.length < 3) {
-    improvements.push('Record yourself for 2 minutes daily and listen back critically. Conscious self-correction is the fastest path to real improvement.')
+    improvements.push('Record yourself for 2 minutes daily, then listen back and pick one thing to fix. Conscious self-correction is the single fastest path to real improvement.')
   }
 
   return {
