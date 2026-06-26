@@ -134,7 +134,7 @@ export function analyzeTranscript(
   const rawWords = text.trim().split(/\s+/).filter(Boolean)
   const wordCount = rawWords.length
 
-  const wpm = elapsedSeconds >= 10
+  const wpm = elapsedSeconds >= 5
     ? Math.round((wordCount / elapsedSeconds) * 60)
     : null
 

@@ -12,14 +12,61 @@ Reading aloud every day is one of the best ways to improve your English fluency,
 
 Keep going. You're doing great!`
 
+const FUNCTION_WORDS = new Set([
+  'a', 'an', 'the',
+  'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about',
+  'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among',
+  'over', 'under', 'around', 'along', 'across', 'behind', 'beside', 'within',
+  'and', 'or', 'but', 'so', 'yet', 'nor', 'although', 'because', 'since',
+  'while', 'if', 'unless', 'until', 'when', 'where', 'that', 'which', 'who', 'whom', 'whose', 'whether',
+  'i', 'me', 'my', 'mine', 'myself',
+  'you', 'your', 'yours', 'yourself',
+  'he', 'him', 'his', 'himself',
+  'she', 'her', 'hers', 'herself',
+  'it', 'its', 'itself',
+  'we', 'us', 'our', 'ours', 'ourselves',
+  'they', 'them', 'their', 'theirs', 'themselves',
+  'this', 'that', 'these', 'those',
+  'what', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'shall', 'should', 'may', 'might', 'must', 'can', 'could',
+  'not', 'no', 'very', 'just', 'also', 'even', 'only', 'there', 'here',
+  'now', 'then', 'too', 'as', 'than', 'like', 'such', 'more', 'most',
+])
+
+const WPM_PRESETS = [
+  { label: 'Slow', wpm: '~100 wpm', speed: 22 },
+  { label: 'Natural', wpm: '~140 wpm', speed: 42 },
+  { label: 'Fast', wpm: '~170 wpm', speed: 60 },
+]
+
+function StressText({ text }: { text: string }) {
+  const tokens = text.split(/(\s+)/)
+  return (
+    <>
+      {tokens.map((token, i) => {
+        if (/^\s+$/.test(token)) return <span key={i}>{token}</span>
+        const word = token.replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, '').toLowerCase()
+        const isFn = FUNCTION_WORDS.has(word)
+        return (
+          <span key={i} className={isFn ? 'text-zinc-500' : 'text-white font-bold'}>
+            {token}
+          </span>
+        )
+      })}
+    </>
+  )
+}
+
 export default function TeleprompterPage() {
   const [mode, setMode] = useState<'edit' | 'present'>('edit')
   const [script, setScript] = useState(DEFAULT_SCRIPT)
   const [scrolling, setScrolling] = useState(false)
-  const [speed, setSpeed] = useState(40)
+  const [speed, setSpeed] = useState(42)
   const [fontSize, setFontSize] = useState(36)
   const [recording, setRecording] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [stressMarkers, setStressMarkers] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
@@ -59,9 +106,7 @@ export default function TeleprompterPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
       chunksRef.current = []
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setAudioUrl(URL.createObjectURL(blob))
@@ -86,6 +131,7 @@ export default function TeleprompterPage() {
     setScrolling(false)
   }
 
+  const activePreset = WPM_PRESETS.find((p) => p.speed === speed)?.label ?? null
   const wordCount = script.trim().split(/\s+/).filter(Boolean).length
 
   if (mode === 'present') {
@@ -99,15 +145,33 @@ export default function TeleprompterPage() {
             &larr; Edit
           </button>
 
+          {/* WPM presets */}
+          <div className="flex items-center gap-1.5">
+            {WPM_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setSpeed(p.speed)}
+                title={p.wpm}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  activePreset === p.label
+                    ? 'bg-zinc-500 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-600">Speed</span>
+            <span className="text-xs text-zinc-600">Fine</span>
             <input
               type="range"
               min={5}
               max={100}
               value={speed}
               onChange={(e) => setSpeed(Number(e.target.value))}
-              className="w-24 accent-zinc-400"
+              className="w-20 accent-zinc-400"
             />
           </div>
 
@@ -122,6 +186,18 @@ export default function TeleprompterPage() {
               className="w-20 accent-zinc-400"
             />
           </div>
+
+          <button
+            onClick={() => setStressMarkers((v) => !v)}
+            title="Highlight content words (nouns, verbs, adjectives) in bold and dim function words"
+            className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+              stressMarkers
+                ? 'bg-indigo-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            Stress
+          </button>
 
           <div className="flex gap-2 ml-auto">
             <button
@@ -159,10 +235,10 @@ export default function TeleprompterPage() {
           style={{ scrollbarWidth: 'none' }}
         >
           <p
-            className="text-white leading-relaxed whitespace-pre-wrap text-center mx-auto max-w-3xl"
+            className="leading-relaxed whitespace-pre-wrap text-center mx-auto max-w-3xl"
             style={{ fontSize: `${fontSize}px`, lineHeight: 1.8 }}
           >
-            {script}
+            {stressMarkers ? <StressText text={script} /> : <span className="text-white">{script}</span>}
           </p>
           <div className="h-screen" />
         </div>
@@ -197,32 +273,75 @@ export default function TeleprompterPage() {
         </p>
       </div>
 
-      <div className="flex items-center gap-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-zinc-500">Text size</span>
-          <input
-            type="range"
-            min={20}
-            max={72}
-            value={fontSize}
-            onChange={(e) => setFontSize(Number(e.target.value))}
-            className="w-28 accent-zinc-400"
-          />
-          <span className="text-sm text-zinc-600 w-8 tabular-nums">{fontSize}</span>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm text-zinc-500">Scroll speed</span>
+          <div className="flex items-center gap-1.5">
+            {WPM_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setSpeed(p.speed)}
+                title={p.wpm}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                  activePreset === p.label
+                    ? 'bg-zinc-500 text-white font-medium'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
+              >
+                {p.label}
+                <span className="ml-1 text-zinc-600">{p.wpm}</span>
+              </button>
+            ))}
+          </div>
           <input
             type="range"
             min={5}
             max={100}
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
-            className="w-28 accent-zinc-400"
+            className="w-24 accent-zinc-400"
           />
-          <span className="text-sm text-zinc-600 w-8 tabular-nums">{speed}</span>
+        </div>
+
+        <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-zinc-500">Text size</span>
+            <input
+              type="range"
+              min={20}
+              max={72}
+              value={fontSize}
+              onChange={(e) => setFontSize(Number(e.target.value))}
+              className="w-28 accent-zinc-400"
+            />
+            <span className="text-sm text-zinc-600 w-8 tabular-nums">{fontSize}</span>
+          </div>
+
+          <button
+            onClick={() => setStressMarkers((v) => !v)}
+            title="Bold content words, dim function words"
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              stressMarkers
+                ? 'bg-indigo-600 text-white font-medium'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            <span>Stress Markers</span>
+            <span className={`text-xs ${stressMarkers ? 'text-indigo-300' : 'text-zinc-600'}`}>
+              {stressMarkers ? 'on' : 'off'}
+            </span>
+          </button>
         </div>
       </div>
+
+      {stressMarkers && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-4 text-sm leading-relaxed whitespace-pre-wrap"
+          style={{ fontSize: `${Math.min(fontSize, 22)}px`, lineHeight: 1.8 }}
+        >
+          <StressText text={script || 'Preview will appear here…'} />
+          {!script && <span className="text-zinc-600 italic">Preview will appear here…</span>}
+        </div>
+      )}
 
       <textarea
         value={script}

@@ -33,10 +33,23 @@ export default function VoicePage() {
   const recognizingRef = useRef(false)
   const interimRef = useRef('')
   const elapsedRef = useRef(0)
+  const transcriptScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
   }, [])
+
+  useEffect(() => {
+    const el = transcriptScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [segments, interim])
+
+  useEffect(() => {
+    if (!recording && fullText.trim().split(/\s+/).filter(Boolean).length >= 5 && grammarStatus === 'idle') {
+      checkGrammar()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording])
 
   const fullText = segments.map((s) => s.text).join('')
   const fullTextWithTimestamps = segments.map((s) => {
@@ -218,7 +231,7 @@ export default function VoicePage() {
       </div>
 
       {/* Transcript */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 min-h-48">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <span className="text-xs text-zinc-500 uppercase tracking-widest">Transcript</span>
           {fullText && (
@@ -230,27 +243,29 @@ export default function VoicePage() {
             </button>
           )}
         </div>
-        {!segments.length && !interim ? (
-          <p className="text-zinc-600 text-sm italic">
-            {recording ? 'Listening — start speaking…' : 'Your words will appear here when you record.'}
-          </p>
-        ) : (
-          <p className="leading-relaxed text-base">
-            {segments.map((seg, i) => (
-              <span key={i}>
-                <span className="text-xs font-mono text-zinc-600 select-none">[{fmt(seg.timestamp)}]</span>
-                {' '}
-                <span
-                  className={segmentColor(seg.confidence)}
-                  title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
-                >
-                  {seg.text}
+        <div ref={transcriptScrollRef} className="overflow-y-auto max-h-64 min-h-16 pr-1">
+          {!segments.length && !interim ? (
+            <p className="text-zinc-600 text-sm italic">
+              {recording ? 'Listening — start speaking…' : 'Your words will appear here when you record.'}
+            </p>
+          ) : (
+            <p className="leading-relaxed text-base">
+              {segments.map((seg, i) => (
+                <span key={i}>
+                  <span className="text-xs font-mono text-zinc-600 select-none">[{fmt(seg.timestamp)}]</span>
+                  {' '}
+                  <span
+                    className={segmentColor(seg.confidence)}
+                    title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
+                  >
+                    {seg.text}
+                  </span>
                 </span>
-              </span>
-            ))}
-            <span className="text-zinc-500 italic">{interim}</span>
-          </p>
-        )}
+              ))}
+              <span className="text-zinc-500 italic">{interim}</span>
+            </p>
+          )}
+        </div>
         {hasColoredWords && !recording && (
           <div className="flex gap-4 mt-4 pt-3 border-t border-zinc-800">
             <span className="text-xs text-zinc-400 flex items-center gap-1.5">
