@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { analyzeTranscript, type AnalysisResult } from '@/lib/analyze'
 
-type Segment = { text: string; confidence: number }
+type Segment = { text: string; confidence: number; timestamp: number }
 type GrammarStatus = 'idle' | 'checking' | 'done'
 type AnalyzeStatus = 'idle' | 'done'
 
@@ -32,6 +32,7 @@ export default function VoicePage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const recognizingRef = useRef(false)
   const interimRef = useRef('')
+  const elapsedRef = useRef(0)
 
   useEffect(() => {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
@@ -54,6 +55,7 @@ export default function VoicePage() {
       recorderRef.current = recorder
 
       // Reset all state before starting recognition
+      elapsedRef.current = 0
       setElapsed(0)
       setSegments([])
       setAudioUrl(null)
@@ -77,8 +79,8 @@ export default function VoicePage() {
             const r = e.results[i]
             if (r.isFinal) {
               const conf = r[0].confidence > 0 ? r[0].confidence : 0.9
-              const clean = r[0].transcript.replace(/[.,!?;:]/g, '').trim()
-              if (clean) setSegments((prev) => [...prev, { text: clean + ' ', confidence: conf }])
+              const text = r[0].transcript.trim()
+              if (text) setSegments((prev) => [...prev, { text: text + ' ', confidence: conf, timestamp: elapsedRef.current }])
             } else {
               inter += r[0].transcript
             }
@@ -89,8 +91,8 @@ export default function VoicePage() {
         recognition.onend = () => {
           if (recognizingRef.current) {
             // Save any interim words before the engine resets — prevents word loss during the ~60s restart
-            const leftover = interimRef.current.replace(/[.,!?;:]/g, '').trim()
-            if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8 }])
+            const leftover = interimRef.current.trim()
+            if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8, timestamp: elapsedRef.current }])
             interimRef.current = ''
             setInterim('')
             try { recognition.start() } catch (_) {}
@@ -103,7 +105,7 @@ export default function VoicePage() {
         recognitionRef.current = recognition
       }
 
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
+      timerRef.current = setInterval(() => { elapsedRef.current += 1; setElapsed((s) => s + 1) }, 1000)
       setRecording(true)
     } catch (_) {
       alert('Microphone access is required. Please allow it in your browser settings.')
@@ -113,8 +115,8 @@ export default function VoicePage() {
   const stop = useCallback(() => {
     recognizingRef.current = false
     // Capture any words still in interim before stopping
-    const leftover = interimRef.current.replace(/[.,!?;:]/g, '').trim()
-    if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8 }])
+    const leftover = interimRef.current.trim()
+    if (leftover) setSegments((prev) => [...prev, { text: leftover + ' ', confidence: 0.8, timestamp: elapsedRef.current }])
     interimRef.current = ''
     recorderRef.current?.stop()
     recognitionRef.current?.stop()
@@ -158,6 +160,15 @@ export default function VoicePage() {
 
   const segmentColor = (conf: number) =>
     conf >= 0.8 ? 'text-zinc-100' : conf >= 0.6 ? 'text-yellow-300' : 'text-red-400'
+
+  const getTimestampForOffset = (offset: number): number => {
+    let pos = 0
+    for (const seg of segments) {
+      if (offset >= pos && offset < pos + seg.text.length) return seg.timestamp
+      pos += seg.text.length
+    }
+    return 0
+  }
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const hasColoredWords = segments.some((s) => s.confidence < 0.8)
@@ -211,12 +222,15 @@ export default function VoicePage() {
         ) : (
           <p className="leading-relaxed text-base">
             {segments.map((seg, i) => (
-              <span
-                key={i}
-                className={segmentColor(seg.confidence)}
-                title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
-              >
-                {seg.text}
+              <span key={i}>
+                <span className="text-xs font-mono text-zinc-600 select-none">[{fmt(seg.timestamp)}]</span>
+                {' '}
+                <span
+                  className={segmentColor(seg.confidence)}
+                  title={`Confidence: ${Math.round(seg.confidence * 100)}%`}
+                >
+                  {seg.text}
+                </span>
               </span>
             ))}
             <span className="text-zinc-500 italic">{interim}</span>
@@ -288,6 +302,7 @@ export default function VoicePage() {
                 return (
                   <div key={i} className="bg-zinc-800/60 rounded-lg p-4 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-mono text-zinc-600">[{fmt(getTimestampForOffset(match.offset))}]</span>
                       <span className="font-mono text-sm bg-red-950/50 text-red-300 px-2 py-0.5 rounded border border-red-900/50">
                         {errorText || '…'}
                       </span>
