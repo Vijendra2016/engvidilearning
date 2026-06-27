@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { analyzeTranscript, type AnalysisResult } from '@/lib/analyze'
+import { saveSession, updateSession } from '@/lib/storage'
 
 type Segment = { text: string; confidence: number; timestamp: number }
 type GrammarStatus = 'idle' | 'checking' | 'done'
@@ -34,6 +35,8 @@ export default function VoicePage() {
   const interimRef = useRef('')
   const elapsedRef = useRef(0)
   const transcriptScrollRef = useRef<HTMLDivElement>(null)
+  const savedSessionIdRef = useRef<string | null>(null)
+  const prevRecordingRef = useRef(false)
 
   useEffect(() => {
     setSpeechSupported('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
@@ -48,6 +51,18 @@ export default function VoicePage() {
     if (!recording && fullText.trim().split(/\s+/).filter(Boolean).length >= 5 && grammarStatus === 'idle') {
       checkGrammar()
     }
+    if (!recording && prevRecordingRef.current && elapsedRef.current >= 3) {
+      savedSessionIdRef.current = saveSession({
+        timestamp: Date.now(),
+        tool: 'voice',
+        durationSeconds: elapsedRef.current,
+        wordCount: 0,
+        wpm: null,
+        scores: null,
+        fillerCount: 0,
+      })
+    }
+    prevRecordingRef.current = recording
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording])
 
@@ -73,6 +88,7 @@ export default function VoicePage() {
       recorderRef.current = recorder
 
       // Reset all state before starting recognition
+      savedSessionIdRef.current = null
       elapsedRef.current = 0
       setElapsed(0)
       setSegments([])
@@ -184,6 +200,12 @@ export default function VoicePage() {
     })
     setAnalyzeResult(result)
     setAnalyzeStatus('done')
+    if (savedSessionIdRef.current) {
+      const wordCount = text.split(/\s+/).filter(Boolean).length
+      const fillerCount = result.fillerWords.reduce((s, f) => s + f.count, 0)
+      updateSession(savedSessionIdRef.current, { wordCount, wpm: result.wpm, scores: result.scores, fillerCount })
+      savedSessionIdRef.current = null
+    }
   }
 
   const segmentColor = (conf: number) =>
@@ -305,6 +327,7 @@ export default function VoicePage() {
               setGrammarMatches([])
               setAnalyzeStatus('idle')
               setAnalyzeResult(null)
+              savedSessionIdRef.current = null
             }}
             className="text-sm text-zinc-600 hover:text-zinc-400 transition-colors"
           >

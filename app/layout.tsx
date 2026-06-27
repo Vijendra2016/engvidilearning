@@ -47,6 +47,9 @@ export default function RootLayout({
               <Link href="/teleprompter" className="text-zinc-400 hover:text-white transition-colors">
                 Teleprompter
               </Link>
+              <Link href="/progress" className="text-zinc-400 hover:text-white transition-colors">
+                Progress
+              </Link>
             </nav>
           </div>
         </header>
